@@ -1,0 +1,7 @@
+# Simbol yang didefinisikan manual di src/hooks.c (tidak dibuatkan trampoline).
+# Tiap nama di sini WAJIB punya fungsi ber-nama sama di hooks.c.
+eglGetProcAddress
+eglSwapBuffers
+glViewport
+glBindFramebuffer
+glFramebufferTexture2D

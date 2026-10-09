@@ -1,0 +1,6 @@
+id=danzgl
+name=DanzGL Shim
+version=v0.1-stage1
+versionCode=1
+author=Ssnz
+description=Shim driver GLES (Mali-G57 / mt6789). Stage 1: passthrough + telemetri untuk com.mobile.legends. Belum mengubah gambar.

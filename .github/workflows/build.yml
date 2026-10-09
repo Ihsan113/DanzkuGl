@@ -1,0 +1,51 @@
+name: build-danzgl
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pastikan symbols ada
+        run: |
+          test -s symbols/mali_symbols.txt || {
+            echo "symbols/mali_symbols.txt kosong/tidak ada. Jalankan tools/dump_symbols.sh di HP, commit hasilnya."
+            exit 1
+          }
+
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Build
+        run: |
+          NDK="${{ steps.ndk.outputs.ndk-path }}"
+          cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-29 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j"$(nproc)"
+
+      - name: Cek ekspor (semua simbol driver asli harus ada)
+        run: |
+          NDK="${{ steps.ndk.outputs.ndk-path }}"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          python3 tools/check_exports.py \
+            --symbols symbols/mali_symbols.txt \
+            --so build/libGLES_mali.so \
+            --nm "$BIN/llvm-nm" --readelf "$BIN/llvm-readelf"
+
+      - name: Bungkus modul
+        run: sh tools/pack.sh build/libGLES_mali.so dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DanzGL-module
+          path: dist/*.zip
