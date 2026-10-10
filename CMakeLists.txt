@@ -15,13 +15,20 @@ endif()
 set(GEN ${CMAKE_BINARY_DIR}/gen)
 file(MAKE_DIRECTORY ${GEN})
 
+set(ALLOW ${CMAKE_SOURCE_DIR}/symbols/allow_skip_data.txt)
+set(ALLOW_ARGS "")
+if(EXISTS ${ALLOW})
+  set(ALLOW_ARGS --allow-data ${ALLOW})
+endif()
+
 add_custom_command(
   OUTPUT ${GEN}/dz_trampolines.S ${GEN}/dz_names.c
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/gen_wrapper.py
           --symbols ${SYMS}
           --override ${CMAKE_SOURCE_DIR}/src/hooked_symbols.txt
+          ${ALLOW_ARGS}
           --out ${GEN}
-  DEPENDS ${SYMS} ${CMAKE_SOURCE_DIR}/src/hooked_symbols.txt ${CMAKE_SOURCE_DIR}/tools/gen_wrapper.py
+  DEPENDS ${SYMS} ${ALLOW} ${CMAKE_SOURCE_DIR}/src/hooked_symbols.txt ${CMAKE_SOURCE_DIR}/tools/gen_wrapper.py
   COMMENT "Generate trampoline dari symbols/mali_symbols.txt")
 
 # target bernama GLES_mali -> menghasilkan libGLES_mali.so (SONAME sama dengan driver asli)

@@ -1,0 +1,8 @@
+# Simbol DATA (bukan fungsi) driver Mali yang boleh TIDAK diekspor wrapper.
+# Tambahkan hanya setelah `sh tools/check_data_users.sh` menyatakan tidak ada yang memakainya.
+# (vtable/typeinfo libc++ bernama _ZT* sudah otomatis dilewati.)
+HMI
+g_counting_index_ex
+g_counting_index_in
+prof_buffer_exclude_switch_time
+prof_buffer_include_switch_time

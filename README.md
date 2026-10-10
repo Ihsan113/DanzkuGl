@@ -8,19 +8,23 @@ Shim driver GLES untuk Mali-G57 MC2 (mt6789, KernelSU). Menggantikan
 viewport, pemakaian FBO) khusus `com.mobile.legends`. Hasil telemetri dipakai untuk
 menulis MSAA (`GL_EXT_multisampled_render_to_texture`) atau supersampling di stage 2.
 
-Status uji: generator, kompilasi, link, dan cek ekspor lolos di host dengan header stub.
+Status uji: generator, kompilasi arm64, link, dan cek ekspor lolos dengan 1010 simbol asli dari
+HP (976 fungsi, 5 hook, 971 trampoline). Logika runtime (muat driver asli, penerusan, whitelist,
+mode 0, telemetri, driver asli hilang) lolos di host x86 dengan driver palsu.
 **Belum diuji di perangkat.** Build asli lewat NDK r26d di GitHub Actions.
 
 ## Alur
 
-1. Di Termux (sudah `pkg install binutils zip`):
+1. `symbols/mali_symbols.txt` sudah terisi (dump dari POCO M5-mu). Kalau driver vendor berubah
+   (OTA), ulangi: `sh tools/dump_symbols.sh`.
+2. Di Termux, cek dulu bahwa 5 simbol DATA driver (`HMI`, `g_counting_index_*`, `prof_buffer_*`)
+   tidak dipakai library lain (wrapper tidak bisa meneruskan data, hanya fungsi):
    ```
-   sh tools/dump_symbols.sh
+   sh tools/check_data_users.sh
    ```
-   Lihat ringkasan tipe. Kalau ada tipe selain `T`/`W`, kirim daftarnya dulu
-   (generator sengaja berhenti, karena simbol data tidak bisa di-trampoline).
-2. Commit `symbols/mali_symbols.txt` (hanya nama simbol, bukan binary) lalu push ke GitHub.
-3. Actions `build-danzgl` jalan, unduh artifact `DanzGL-module` (zip modul).
+   Harus `OK`. Kalau ada baris `!!`, kirim hasilnya ke Claude sebelum lanjut.
+3. Push repo ke GitHub (symbols ikut). Actions `build-danzgl` jalan, unduh artifact
+   `DanzGL-module` (zip modul).
 4. KernelSU Manager, Modul, Pasang dari penyimpanan, reboot.
 5. Tes boot dulu dengan mode 0 (default). Kalau normal, aktifkan telemetri:
    ```

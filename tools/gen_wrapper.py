@@ -56,6 +56,8 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--allow-skip-data", action="store_true",
                     help="lanjut walau ada simbol data (BUKAN fungsi) yang tidak bisa di-trampoline")
+    ap.add_argument("--allow-data", default=None,
+                    help="file berisi nama simbol data yang BOLEH dilewati (satu per baris, # komentar)")
     a = ap.parse_args()
 
     funcs, data, bad = parse_symbols(a.symbols)
@@ -70,17 +72,25 @@ def main():
         return 2
 
     if data:
-        kinds = {}
-        for n, t in data.items():
-            kinds.setdefault(t, []).append(n)
-        print("[gen] PERINGATAN: ada simbol BUKAN fungsi (tidak bisa di-trampoline):", file=sys.stderr)
-        for t, ns in sorted(kinds.items()):
-            print(f"       tipe {t}: {len(ns)} simbol, contoh: {sorted(ns)[:8]}", file=sys.stderr)
-        if not a.allow_skip_data:
-            print("[gen] ERROR: kirim daftar di atas dulu. Kalau dilewati, loader/meow yang "
-                  "memakai simbol itu bisa crash. Pakai --allow-skip-data hanya kalau yakin.",
-                  file=sys.stderr)
-            return 3
+        # vtable/typeinfo libc++ (weak, nama _ZT*) selalu ada juga di libc++.so, aman dilewati
+        auto = {n for n, t in data.items() if t in "Vv" and n.startswith("_ZT")}
+        listed = set(parse_override(a.allow_data)) if a.allow_data else set()
+        blocking = {n: t for n, t in data.items() if n not in auto and n not in listed}
+        print(f"[gen] simbol data dilewati: {len(auto)} libc++ (_ZT*), "
+              f"{len(listed & set(data))} dari allow-list", file=sys.stderr)
+        if blocking:
+            kinds = {}
+            for n, t in blocking.items():
+                kinds.setdefault(t, []).append(n)
+            print("[gen] PERINGATAN: ada simbol BUKAN fungsi yang belum di-allow:", file=sys.stderr)
+            for t, ns in sorted(kinds.items()):
+                print(f"       tipe {t}: {len(ns)} simbol: {sorted(ns)[:12]}", file=sys.stderr)
+            if not a.allow_skip_data:
+                print("[gen] ERROR: simbol data tidak bisa di-trampoline. Pastikan tidak ada library "
+                      "yang memakainya (tools/check_data_users.sh), lalu tambahkan ke "
+                      "symbols/allow_skip_data.txt. --allow-skip-data melewati semuanya tanpa cek.",
+                      file=sys.stderr)
+                return 3
 
     for n in funcs:
         if not NAME_RE.match(n):
