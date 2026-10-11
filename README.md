@@ -35,6 +35,14 @@ mode 0, telemetri, driver asli hilang) lolos di host x86 dengan driver palsu.
    su -c 'logcat -d -s DanzGL'
    ```
 
+## Catatan: driver dimuat di zygote
+
+Android memuat driver GL sekali di zygote lalu mem-fork proses app. Karena itu whitelist TIDAK
+boleh dicek di constructor (nama proses saat itu masih `zygote64`). Hook memeriksa `getpid()` di
+tiap panggilan dan menghitung ulang keputusan (whitelist, mode, statistik) kalau pid berubah.
+Baris `hooks AKTIF: proc=com.mobile.legends pid=... mode=...` muncul di logcat begitu game
+memanggil GL pertama kali.
+
 ## Pengaman
 
 - Boot guard: kalau boot sebelumnya tidak selesai, modul menonaktifkan dirinya (best effort,

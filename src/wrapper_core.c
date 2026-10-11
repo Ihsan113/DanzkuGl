@@ -25,11 +25,12 @@ extern void *dz_real_table[];
 extern const char *const dz_sym_names[];
 extern const unsigned dz_sym_count;
 
-/* string ini dicari customize.sh (grep) untuk mendeteksi "ini wrapper, bukan driver asli" */
-__attribute__((used)) static const char dz_marker_str[] = "DANZGL_SHIM_MARKER_v1";
+/* string ini dicari skrip (grep) untuk mendeteksi "ini wrapper, bukan driver asli".
+ * Harus dirujuk dari fungsi yang diekspor, kalau tidak linker (--gc-sections) membuangnya. */
+__attribute__((used, retain)) static const char dz_marker_str[] = "DANZGL_SHIM_MARKER_v1";
 
 /* dipakai untuk mendeteksi dlopen yang tidak sengaja memuat wrapper sendiri */
-DZ_EXPORT int dz_shim_marker(void) { return 1; }
+DZ_EXPORT const char *dz_shim_marker(void) { return dz_marker_str; }
 
 static void *g_real;
 static char g_proc[160];
@@ -58,6 +59,8 @@ static void read_proc_name(void) {
     if (n <= 0) strcpy(g_proc, "?");
     else g_proc[n] = '\0'; /* cmdline NUL-terminated per argumen; argv[0] saja yang terbaca sebagai string */
 }
+
+void dz_proc_refresh(void) { read_proc_name(); }
 
 static void *try_open(const char *path) {
     void *h = dlopen(path, RTLD_NOW | RTLD_LOCAL);

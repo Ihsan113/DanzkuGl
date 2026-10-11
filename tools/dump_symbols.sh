@@ -8,9 +8,11 @@ VENDOR=/vendor/lib64/egl/mt6789/libGLES_mali.so
 MODREAL=/data/adb/modules/danzgl/system/vendor/lib64/egl/mt6789/libGLES_mali_real.so
 
 SRC=$VENDOR
-# kalau modul sudah terpasang, /vendor menampilkan wrapper -> ambil salinan driver asli dari modul
-if su -c "grep -c DANZGL_SHIM_MARKER $VENDOR" 2>/dev/null | grep -qv '^0$'; then
-  echo "[dump] modul terpasang, memakai salinan driver asli dari modul"
+# kalau modul sudah terpasang, /vendor menampilkan wrapper -> ambil salinan driver asli dari modul.
+# Deteksi lewat UKURAN (driver asli ~38 MB, wrapper < 1 MB); marker string hanya cadangan.
+VSIZE=$(su -c "wc -c < $VENDOR" 2>/dev/null | tr -d ' ')
+if [ "${VSIZE:-0}" -lt 5000000 ] || su -c "grep -c DANZGL_SHIM_MARKER $VENDOR" 2>/dev/null | grep -qv '^0$'; then
+  echo "[dump] /vendor menampilkan wrapper (ukuran $VSIZE), memakai salinan driver asli dari modul"
   SRC=$MODREAL
 fi
 

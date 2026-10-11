@@ -20,6 +20,7 @@
 #include <string.h>
 #include <sys/system_properties.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "dz.h"
 
@@ -31,7 +32,13 @@ typedef uint32_t GLuint;
 
 static const char *const kWhitelist[] = {"com.mobile.legends", NULL};
 
-static int g_active;
+/* State PER PROSES. Driver GL sudah dimuat di zygote (preloadOpenGL) lalu proses app di-fork,
+ * jadi constructor tidak jalan lagi di app dan nama proses saat itu masih "zygote64".
+ * Karena itu whitelist dicek malas: tiap panggilan hook membandingkan pid; kalau berubah
+ * (proses baru / anak fork), keputusan dihitung ulang dari cmdline yang sudah final. */
+static volatile int g_active;
+static volatile pid_t g_pid;
+static volatile int g_initlock;
 
 /* ---------- pointer ke fungsi asli ---------- */
 typedef void *(*fn_egpa)(const char *);
@@ -134,8 +141,63 @@ static void flush_window(uint64_t t) {
            over ? " (histogram penuh)" : "");
 }
 
+/* ---------- keputusan aktif/mati per proses ---------- */
+static int is_listed(const char *proc) {
+    for (int i = 0; kWhitelist[i]; i++)
+        if (!strcmp(proc, kWhitelist[i])) return 1;
+    return 0;
+}
+
+static void reinit_slow(pid_t pid) {
+    while (__sync_lock_test_and_set(&g_initlock, 1)) {
+    }
+    if (g_pid != pid) {
+        dz_proc_refresh();
+        const char *proc = dz_proc_name();
+        int listed = is_listed(proc);
+        int mode = 0, plen = 0;
+        if (listed) {
+            char val[PROP_VALUE_MAX] = {0};
+            plen = __system_property_get("debug.danzgl.mode", val);
+            mode = atoi(val);
+        }
+
+        /* statistik milik proses ini: buang warisan dari proses induk */
+        __atomic_store_n(&g_frames, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&g_bind0, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&g_bind1, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&g_attach, 0, __ATOMIC_RELAXED);
+        g_t0 = 0;
+        hist_lock();
+        memset(g_hist, 0, sizeof(g_hist));
+        g_hist_over = 0;
+        hist_unlock();
+
+        g_active = 0;
+        if (listed && mode >= 1) {
+            REAL(r_egpa, "eglGetProcAddress");
+            REAL(r_swap, "eglSwapBuffers");
+            REAL(r_viewport, "glViewport");
+            REAL(r_bindfb, "glBindFramebuffer");
+            REAL(r_fbtex2d, "glFramebufferTexture2D");
+            g_active = 1;
+        }
+        if (listed)
+            dz_log("hooks %s: proc=%s pid=%d mode=%d (panjang prop=%d)", g_active ? "AKTIF" : "mati",
+                   proc, (int)pid, mode, plen);
+        __atomic_store_n(&g_pid, pid, __ATOMIC_RELEASE);
+    }
+    __sync_lock_release(&g_initlock);
+}
+
+static inline void ensure_init(void) {
+    pid_t pid = getpid();
+    if (__builtin_expect(__atomic_load_n(&g_pid, __ATOMIC_ACQUIRE) != pid, 0)) reinit_slow(pid);
+}
+
 /* ---------- hook (h_*) ---------- */
 DZ_HIDDEN EGLBoolean h_eglSwapBuffers(void *dpy, void *surf) {
+    ensure_init();
     fn_swap r = REAL(r_swap, "eglSwapBuffers");
     if (g_active) {
         __atomic_add_fetch(&g_frames, 1, __ATOMIC_RELAXED);
@@ -151,12 +213,14 @@ DZ_HIDDEN EGLBoolean h_eglSwapBuffers(void *dpy, void *surf) {
 }
 
 DZ_HIDDEN void h_glViewport(GLint x, GLint y, GLsizei w, GLsizei h) {
+    ensure_init();
     fn_viewport r = REAL(r_viewport, "glViewport");
     if (g_active) hist_add(w, h);
     if (r) r(x, y, w, h);
 }
 
 DZ_HIDDEN void h_glBindFramebuffer(GLenum target, GLuint fb) {
+    ensure_init();
     fn_bindfb r = REAL(r_bindfb, "glBindFramebuffer");
     if (g_active) __atomic_add_fetch(fb ? &g_bind1 : &g_bind0, 1, __ATOMIC_RELAXED);
     if (r) r(target, fb);
@@ -164,6 +228,7 @@ DZ_HIDDEN void h_glBindFramebuffer(GLenum target, GLuint fb) {
 
 DZ_HIDDEN void h_glFramebufferTexture2D(GLenum target, GLenum att, GLenum textarget, GLuint tex,
                                         GLint level) {
+    ensure_init();
     fn_fbtex2d r = REAL(r_fbtex2d, "glFramebufferTexture2D");
     if (g_active) __atomic_add_fetch(&g_attach, 1, __ATOMIC_RELAXED);
     if (r) r(target, att, textarget, tex, level);
@@ -180,6 +245,7 @@ static const struct {
 };
 
 DZ_HIDDEN void *h_eglGetProcAddress(const char *name) {
+    ensure_init();
     fn_egpa r = REAL(r_egpa, "eglGetProcAddress");
     if (!r) return NULL;
     void *p = r(name);
@@ -198,26 +264,4 @@ DZ_EXPORT void glBindFramebuffer(GLenum target, GLuint fb) { h_glBindFramebuffer
 DZ_EXPORT void glFramebufferTexture2D(GLenum target, GLenum att, GLenum textarget, GLuint tex,
                                       GLint level) {
     h_glFramebufferTexture2D(target, att, textarget, tex, level);
-}
-
-/* ---------- init (setelah wrapper_core: priority 101) ---------- */
-__attribute__((constructor(102))) static void hooks_init(void) {
-    const char *proc = dz_proc_name();
-    int listed = 0;
-    for (int i = 0; kWhitelist[i]; i++)
-        if (!strcmp(proc, kWhitelist[i])) listed = 1;
-    if (!listed) return;
-
-    char val[PROP_VALUE_MAX] = {0};
-    __system_property_get("debug.danzgl.mode", val);
-    int mode = atoi(val);
-    if (mode >= 1) {
-        REAL(r_egpa, "eglGetProcAddress");
-        REAL(r_swap, "eglSwapBuffers");
-        REAL(r_viewport, "glViewport");
-        REAL(r_bindfb, "glBindFramebuffer");
-        REAL(r_fbtex2d, "glFramebufferTexture2D");
-        g_active = 1;
-    }
-    dz_log("hooks %s: proc=%s mode=%d", g_active ? "AKTIF" : "mati", proc, mode);
 }
